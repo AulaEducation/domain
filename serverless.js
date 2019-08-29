@@ -18,7 +18,8 @@ const {
   getApiDomainName,
   removeCloudFrontDomainDnsRecords,
   addDomainToCloudfrontDistribution,
-  removeDomainFromCloudFrontDistribution
+  removeDomainFromCloudFrontDistribution,
+  waitForDistributionDeployed
 } = require('./utils')
 
 class Domain extends Component {
@@ -110,12 +111,20 @@ class Domain extends Component {
             subdomain,
             certificate.CertificateArn
           )
+          if (subdomain.waitForCreateDistribution) {
+            this.context.debug(`Waiting for create cloudfront distribution complete ....`)
+            await waitForDistributionDeployed(clients.cf, distribution.id)
+          }
         } else if (
           !distribution.origins.includes(`${subdomain.s3BucketName}.s3.amazonaws.com`) ||
           !distribution.errorPages
         ) {
           this.context.debug(`Updating distribution "${distribution.url}".`)
           distribution = await updateCloudfrontDistribution(clients.cf, subdomain, distribution.id)
+          if (subdomain.waitForUpdateDistribution) {
+            this.context.debug(`Waiting for update cloudfront distribution complete ....`)
+            await waitForDistributionDeployed(clients.cf, distribution.id)
+          }
         }
 
         this.context.debug(`Configuring DNS for distribution "${distribution.url}".`)

@@ -50,9 +50,7 @@ const prepareSubdomains = (inputs) => {
 
     if (inputs.subdomains[subdomain].url.includes('s3')) {
       domainObj.type = 'awsS3Website'
-      // Get S3 static hosting endpoint of existing bucket to use w/ CloudFront.
-      // todo this doesn't work with bucket names with periods
-      domainObj.s3BucketName = inputs.subdomains[subdomain].url.replace('http://', '').split('.')[0]
+      domainObj.s3BucketName = inputs.subdomains[subdomain].bucketName
     }
 
     // Check if referenced Component is using AWS API Gateway...
@@ -65,6 +63,13 @@ const prepareSubdomains = (inputs) => {
       domainObj.distributionId = inputs.subdomains[subdomain].id
       domainObj.url = inputs.subdomains[subdomain].url
       domainObj.type = 'awsCloudFront'
+    }
+
+    const { cloudFront } = inputs.subdomains[subdomain]
+    if (cloudFront) {
+      domainObj.waitForCreateDistribution = cloudFront.waitForCreateDistribution
+      domainObj.waitForUpdateDistribution = cloudFront.waitForUpdateDistribution
+      domainObj.customOrigin = cloudFront.customOrigin
     }
 
     subdomains.push(domainObj)
@@ -450,11 +455,46 @@ const configureDnsForCloudFrontDistribution = async (
   return route53.changeResourceRecordSets(dnsRecordParams).promise()
 }
 
+const waitForDistributionDeployed = (cf, id) => {
+  return new Promise((resolve, reject) => {
+    cf.waitFor('distributionDeployed', { Id: id }, (err) => {
+      if (err) {
+        reject(err.message)
+      }
+      resolve()
+    })
+  })
+}
+
 /**
  * Create Cloudfront Distribution
  */
 
 const createCloudfrontDistribution = async (cf, subdomain, certificateArn) => {
+  const s3BucketOriginConfig = {
+    S3OriginConfig: {
+      OriginAccessIdentity: ''
+    }
+  }
+  const customOriginConfig = {
+    CustomOriginConfig: {
+      HTTPPort: 80 /* required */,
+      HTTPSPort: 443 /* required */,
+      OriginProtocolPolicy: 'http-only' /* required */,
+      OriginSslProtocols: {
+        Items: [
+          /* required */
+          'TLSv1'
+          /* more items */
+        ],
+        Quantity: 1 /* required */
+      }
+    }
+  }
+  const originConfig = subdomain.customOrigin ? customOriginConfig : s3BucketOriginConfig
+  const domainName = subdomain.customOrigin
+    ? `${subdomain.s3BucketName}.s3-website-eu-west-1.amazonaws.com`
+    : `${subdomain.s3BucketName}.s3.amazonaws.com`
   const params = {
     DistributionConfig: {
       CallerReference: String(Date.now()),
@@ -468,15 +508,13 @@ const createCloudfrontDistribution = async (cf, subdomain, certificateArn) => {
         Items: [
           {
             Id: `S3-${subdomain.s3BucketName}`,
-            DomainName: `${subdomain.s3BucketName}.s3.amazonaws.com`,
+            DomainName: domainName,
             OriginPath: '',
             CustomHeaders: {
               Quantity: 0,
               Items: []
             },
-            S3OriginConfig: {
-              OriginAccessIdentity: ''
-            }
+            ...originConfig
           }
         ]
       },
@@ -886,5 +924,6 @@ module.exports = {
   getApiDomainName,
   removeCloudFrontDomainDnsRecords,
   addDomainToCloudfrontDistribution,
-  removeDomainFromCloudFrontDistribution
+  removeDomainFromCloudFrontDistribution,
+  waitForDistributionDeployed
 }
