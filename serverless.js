@@ -109,7 +109,8 @@ class Domain extends Component {
           distribution = await createCloudfrontDistribution(
             clients.cf,
             subdomain,
-            certificate.CertificateArn
+            certificate.CertificateArn,
+            inputs.region
           )
           if (subdomain.waitForCreateDistribution) {
             this.context.debug(`Waiting for create cloudfront distribution complete ....`)
@@ -120,7 +121,12 @@ class Domain extends Component {
           !distribution.errorPages
         ) {
           this.context.debug(`Updating distribution "${distribution.url}".`)
-          distribution = await updateCloudfrontDistribution(clients.cf, subdomain, distribution.id)
+          distribution = await updateCloudfrontDistribution(
+            clients.cf,
+            subdomain,
+            distribution.id,
+            inputs.region
+          )
           if (subdomain.waitForUpdateDistribution) {
             this.context.debug(`Waiting for update cloudfront distribution complete ....`)
             await waitForDistributionDeployed(clients.cf, distribution.id)

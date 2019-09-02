@@ -1,5 +1,6 @@
 const aws = require('aws-sdk')
 const { utils } = require('@serverless/core')
+const regionUrls = require('./awsRegionUrls')
 
 /**
  * Get Clients
@@ -466,11 +467,7 @@ const waitForDistributionDeployed = (cf, id) => {
   })
 }
 
-/**
- * Create Cloudfront Distribution
- */
-
-const createCloudfrontDistribution = async (cf, subdomain, certificateArn) => {
+const getS3OriginInfo = (subdomain, region) => {
   const s3BucketOriginConfig = {
     S3OriginConfig: {
       OriginAccessIdentity: ''
@@ -481,6 +478,8 @@ const createCloudfrontDistribution = async (cf, subdomain, certificateArn) => {
       HTTPPort: 80 /* required */,
       HTTPSPort: 443 /* required */,
       OriginProtocolPolicy: 'http-only' /* required */,
+      OriginReadTimeout: 30,
+      OriginKeepaliveTimeout: 5,
       OriginSslProtocols: {
         Items: [
           /* required */
@@ -493,8 +492,17 @@ const createCloudfrontDistribution = async (cf, subdomain, certificateArn) => {
   }
   const originConfig = subdomain.customOrigin ? customOriginConfig : s3BucketOriginConfig
   const domainName = subdomain.customOrigin
-    ? `${subdomain.s3BucketName}.s3-website-eu-west-1.amazonaws.com`
+    ? `${subdomain.s3BucketName}.${regionUrls[region]}`
     : `${subdomain.s3BucketName}.s3.amazonaws.com`
+  return { originConfig, domainName }
+};
+
+/**
+ * Create Cloudfront Distribution
+ */
+
+const createCloudfrontDistribution = async (cf, subdomain, certificateArn, region) => {
+  const { originConfig, domainName } = getS3OriginInfo(subdomain, region)
   const params = {
     DistributionConfig: {
       CallerReference: String(Date.now()),
@@ -631,7 +639,7 @@ const createCloudfrontDistribution = async (cf, subdomain, certificateArn) => {
  * Updates a distribution's origins
  */
 
-const updateCloudfrontDistribution = async (cf, subdomain, distributionId) => {
+const updateCloudfrontDistribution = async (cf, subdomain, distributionId, region) => {
   // Update logic is a bit weird...
   // https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/CloudFront.html#updateDistribution-property
 
@@ -666,25 +674,24 @@ const updateCloudfrontDistribution = async (cf, subdomain, distributionId) => {
       }
     ]
   }
+  const { originConfig, domainName } = getS3OriginInfo(subdomain, region)
   params.DistributionConfig.Origins.Items = [
     {
       Id: `S3-${subdomain.s3BucketName}`,
-      DomainName: `${subdomain.s3BucketName}.s3.amazonaws.com`,
+      DomainName: domainName,
       OriginPath: '',
       CustomHeaders: {
         Quantity: 0,
         Items: []
       },
-      S3OriginConfig: {
-        OriginAccessIdentity: ''
-      }
+      ...originConfig
     }
   ]
 
   params.DistributionConfig.DefaultCacheBehavior.TargetOriginId = `S3-${subdomain.s3BucketName}`
 
   // 6. then finally update!
-  const res = await cf.updateDistribution(params).promise()
+  const res = await cf.updateDistribution(params).promise() // TODO fixed path
 
   return {
     id: res.Distribution.Id,
