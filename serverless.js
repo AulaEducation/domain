@@ -98,7 +98,7 @@ class Domain extends Component {
 
     // Setting up domains for different services
     for (const subdomain of subdomains) {
-      const lambda = await this.load('@serverless/aws-lambda')
+      const lambda = await this.load('@ublend-npm/aws-lambda')
       this.context.debug(
         subdomain.triggers ? 'Adding lambda triggers' : 'No lambda triggers to configure'
       )
