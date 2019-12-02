@@ -13,6 +13,7 @@
   "license": "Apache",
   "dependencies": {
     "@serverless/core": "^1.0.0",
+    "@ublend-npm/aws-lambda": "^0.0.1",
     "aws-sdk": "^2.499.0"
   },
   "devDependencies": {
