@@ -66,12 +66,14 @@ const prepareSubdomains = (inputs) => {
       domainObj.type = 'awsCloudFront'
     }
 
-    const { cloudFront } = inputs.subdomains[subdomain]
+    const { cloudFront, institution } = inputs.subdomains[subdomain]
     if (cloudFront) {
       domainObj.waitForCreateDistribution = cloudFront.waitForCreateDistribution
       domainObj.waitForUpdateDistribution = cloudFront.waitForUpdateDistribution
       domainObj.customOrigin = cloudFront.customOrigin
+      domainObj.triggers = cloudFront.triggers
     }
+    domainObj.institution = institution
 
     subdomains.push(domainObj)
   }
@@ -495,13 +497,28 @@ const getS3OriginInfo = (subdomain, region) => {
     ? `${subdomain.s3BucketName}.${regionUrls[region]}`
     : `${subdomain.s3BucketName}.s3.amazonaws.com`
   return { originConfig, domainName }
-};
+}
+
+function getLambdaAssociations(triggers) {
+  // update triggers if there is any
+  if ((triggers || []).length) {
+    const lambdaAssociations = triggers.map((trigger) => ({
+      EventType: trigger.type,
+      LambdaFunctionARN: `${trigger.arn}:${trigger.version}`
+    }))
+    return {
+      Quantity: lambdaAssociations.length,
+      Items: lambdaAssociations
+    }
+  }
+  return { Quantity: 0, Items: [] }
+}
 
 /**
  * Create Cloudfront Distribution
  */
 
-const createCloudfrontDistribution = async (cf, subdomain, certificateArn, region) => {
+const createCloudfrontDistribution = async (cf, subdomain, certificateArn, region, triggers) => {
   const { originConfig, domainName } = getS3OriginInfo(subdomain, region)
   const params = {
     DistributionConfig: {
@@ -564,7 +581,7 @@ const createCloudfrontDistribution = async (cf, subdomain, certificateArn, regio
         SmoothStreaming: false,
         DefaultTTL: 86400,
         MaxTTL: 31536000,
-        Compress: false,
+        Compress: true,
         LambdaFunctionAssociations: {
           Quantity: 0,
           Items: []
@@ -626,6 +643,10 @@ const createCloudfrontDistribution = async (cf, subdomain, certificateArn, regio
     params.DistributionConfig.Aliases.Items.push(`${subdomain.domain.replace('www.', '')}`)
   }
 
+  params.DistributionConfig.DefaultCacheBehavior.LambdaFunctionAssociations = getLambdaAssociations(
+    triggers
+  )
+
   const res = await cf.createDistribution(params).promise()
 
   return {
@@ -638,8 +659,7 @@ const createCloudfrontDistribution = async (cf, subdomain, certificateArn, regio
 /*
  * Updates a distribution's origins
  */
-
-const updateCloudfrontDistribution = async (cf, subdomain, distributionId, region) => {
+const updateCloudfrontDistribution = async (cf, subdomain, distributionId, region, triggers) => {
   // Update logic is a bit weird...
   // https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/CloudFront.html#updateDistribution-property
 
@@ -674,7 +694,7 @@ const updateCloudfrontDistribution = async (cf, subdomain, distributionId, regio
       }
     ]
   }
-  const { originConfig, domainName } = getS3OriginInfo(subdomain, region)
+  const { originConfig, domainName } = getS3OriginInfo(subdomain, region, triggers)
   params.DistributionConfig.Origins.Items = [
     {
       Id: `S3-${subdomain.s3BucketName}`,
@@ -689,6 +709,10 @@ const updateCloudfrontDistribution = async (cf, subdomain, distributionId, regio
   ]
 
   params.DistributionConfig.DefaultCacheBehavior.TargetOriginId = `S3-${subdomain.s3BucketName}`
+
+  params.DistributionConfig.DefaultCacheBehavior.LambdaFunctionAssociations = getLambdaAssociations(
+    triggers
+  )
 
   // 6. then finally update!
   const res = await cf.updateDistribution(params).promise() // TODO fixed path
@@ -904,6 +928,39 @@ const removeDomainFromCloudFrontDistribution = async (cf, subdomain) => {
   }
 }
 
+const triggerTypes = ['viewer-request', 'origin-request', 'origin-response', 'viewer-response']
+
+const createLambda = async (lambda, trigger, subdomain, role) => {
+  const publishedLambda = await lambda({
+    runtime: 'nodejs10.x',
+    code: trigger.code,
+    handler: trigger.handler,
+    name: trigger.name,
+    region: 'us-east-1', // for edge lambda 'us-east1' is used.
+    description: trigger.description || trigger.name,
+    memory: 128,
+    timeout: 5,
+    role
+  })
+  const { version } = await lambda.publishVersion()
+  return { ...publishedLambda, version }
+}
+
+const addLambdaTrigger = async (lambda, subdomain) => {
+  const createLambdas = subdomain.triggers.map((trigger) => {
+    if (!triggerTypes.includes(trigger.type)) {
+      throw new Error(`lambda trigger type ${trigger.type} is not valid`)
+    }
+    const role = {
+      name: `${trigger.name}-role`,
+      service: ['lambda.amazonaws.com', 'edgelambda.amazonaws.com']
+    }
+    return createLambda(lambda, trigger, subdomain, role)
+  })
+  const lambdas = await Promise.all(createLambdas)
+  return lambdas.map((trigger, index) => ({ ...trigger, type: subdomain.triggers[index].type }))
+}
+
 /**
  * Exports
  */
@@ -932,5 +989,6 @@ module.exports = {
   removeCloudFrontDomainDnsRecords,
   addDomainToCloudfrontDistribution,
   removeDomainFromCloudFrontDistribution,
-  waitForDistributionDeployed
+  waitForDistributionDeployed,
+  addLambdaTrigger
 }

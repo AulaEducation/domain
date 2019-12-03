@@ -19,7 +19,8 @@ const {
   removeCloudFrontDomainDnsRecords,
   addDomainToCloudfrontDistribution,
   removeDomainFromCloudFrontDistribution,
-  waitForDistributionDeployed
+  waitForDistributionDeployed,
+  addLambdaTrigger
 } = require('./utils')
 
 class Domain extends Component {
@@ -97,6 +98,11 @@ class Domain extends Component {
 
     // Setting up domains for different services
     for (const subdomain of subdomains) {
+      const lambda = await this.load('@ublend-npm/aws-lambda')
+      this.context.debug(
+        subdomain.triggers ? 'Adding lambda triggers' : 'No lambda triggers to configure'
+      )
+      const triggers = subdomain.triggers ? await addLambdaTrigger(lambda, subdomain) : []
       if (subdomain.type === 'awsS3Website') {
         this.context.debug(`Configuring domain "${subdomain.domain}" for S3 Bucket Website`)
 
@@ -110,7 +116,8 @@ class Domain extends Component {
             clients.cf,
             subdomain,
             certificate.CertificateArn,
-            inputs.region
+            inputs.region,
+            triggers
           )
           if (subdomain.waitForCreateDistribution) {
             this.context.debug(`Waiting for create cloudfront distribution complete ....`)
@@ -125,7 +132,8 @@ class Domain extends Component {
             clients.cf,
             subdomain,
             distribution.id,
-            inputs.region
+            inputs.region,
+            triggers
           )
           if (subdomain.waitForUpdateDistribution) {
             this.context.debug(`Waiting for update cloudfront distribution complete ....`)

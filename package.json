@@ -1,6 +1,6 @@
 {
   "name": "@ublend-npm/serverless-compoonent-domain",
-  "version": "0.0.2",
+  "version": "0.0.6",
   "main": "./serverless.js",
   "publishConfig": {
     "access": "public"
@@ -13,6 +13,7 @@
   "license": "Apache",
   "dependencies": {
     "@serverless/core": "^1.0.0",
+    "@ublend-npm/aws-lambda": "^0.0.2",
     "aws-sdk": "^2.499.0"
   },
   "devDependencies": {
