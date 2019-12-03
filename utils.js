@@ -932,7 +932,7 @@ const triggerTypes = ['viewer-request', 'origin-request', 'origin-response', 'vi
 
 const createLambda = async (lambda, trigger, subdomain, role) => {
   const publishedLambda = await lambda({
-    runtime: 'nodejs12.x',
+    runtime: 'nodejs10.x',
     code: trigger.code,
     handler: trigger.handler,
     name: trigger.name,
