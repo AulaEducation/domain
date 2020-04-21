@@ -502,9 +502,15 @@ const getS3OriginInfo = (subdomain, region) => {
 
 const getLambdaVersion = async (functionName) => {
   const lambda = new aws.Lambda({ region: 'us-east-1' })
-  const { Versions } = await lambda.listVersionsByFunction({ FunctionName: functionName }).promise()
+  try {
+    const { Versions } = await lambda
+      .listVersionsByFunction({ FunctionName: functionName })
+      .promise()
 
-  return Versions.pop()
+    return Versions.pop()
+  } catch (e) {
+    return undefined
+  }
 }
 
 function getLambdaAssociations(triggers) {
@@ -973,14 +979,17 @@ const addLambdaTrigger = async (lambda, subdomain) => {
     if (!triggerTypes.includes(type)) {
       throw new Error(`lambda trigger type ${type} is not valid`)
     }
-    return {
-      ...(await getLambdaVersion(functionName)),
-      type
+    const fetchedLambda = await getLambdaVersion(functionName)
+    if (fetchedLambda) {
+      return {
+        ...fetchLambdas,
+        type
+      }
     }
   })
 
   const lambdas = await Promise.all(createLambdas)
-  const existingLambdas = await Promise.all(fetchLambdas)
+  const existingLambdas = (await Promise.all(fetchLambdas)).filter((exists) => exists)
 
   return [...lambdas, ...existingLambdas].map((trigger) => ({
     ...trigger,
