@@ -71,7 +71,8 @@ const prepareSubdomains = (inputs) => {
       domainObj.waitForCreateDistribution = cloudFront.waitForCreateDistribution
       domainObj.waitForUpdateDistribution = cloudFront.waitForUpdateDistribution
       domainObj.customOrigin = cloudFront.customOrigin
-      domainObj.triggers = cloudFront.triggers
+      domainObj.triggers = cloudFront.triggers || []
+      domainObj.customLambdaAssociations = cloudFront.customLambdaAssociations || []
     }
     domainObj.institution = institution
 
@@ -499,12 +500,19 @@ const getS3OriginInfo = (subdomain, region) => {
   return { originConfig, domainName }
 }
 
+const getLambdaVersion = async (functionName) => {
+  const lambda = new aws.Lambda({ region: 'us-east-1' })
+  const { Versions } = await lambda.listVersionsByFunction({ FunctionName: functionName }).promise()
+
+  return Versions.pop()
+}
+
 function getLambdaAssociations(triggers) {
   // update triggers if there is any
   if ((triggers || []).length) {
     const lambdaAssociations = triggers.map((trigger) => ({
       EventType: trigger.type,
-      LambdaFunctionARN: `${trigger.arn}:${trigger.version}`
+      LambdaFunctionARN: trigger.FunctionArn || `${trigger.arn}:${trigger.version}`
     }))
     return {
       Quantity: lambdaAssociations.length,
@@ -955,10 +963,29 @@ const addLambdaTrigger = async (lambda, subdomain) => {
       name: `${trigger.name}-role`,
       service: ['lambda.amazonaws.com', 'edgelambda.amazonaws.com']
     }
-    return createLambda(lambda, trigger, subdomain, role)
+    return {
+      ...createLambda(lambda, trigger, subdomain, role),
+      type: trigger.type
+    }
   })
+
+  const fetchLambdas = subdomain.customLambdaAssociations.map(async ({ functionName, type }) => {
+    if (!triggerTypes.includes(type)) {
+      throw new Error(`lambda trigger type ${type} is not valid`)
+    }
+    return {
+      ...(await getLambdaVersion(functionName)),
+      type
+    }
+  })
+
   const lambdas = await Promise.all(createLambdas)
-  return lambdas.map((trigger, index) => ({ ...trigger, type: subdomain.triggers[index].type }))
+  const existingLambdas = await Promise.all(fetchLambdas)
+
+  return [...lambdas, ...existingLambdas].map((trigger) => ({
+    ...trigger,
+    type: trigger.type
+  }))
 }
 
 /**
