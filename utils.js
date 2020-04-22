@@ -982,7 +982,7 @@ const addLambdaTrigger = async (lambda, subdomain) => {
     const fetchedLambda = await getLambdaVersion(functionName)
     if (fetchedLambda) {
       return {
-        ...fetchLambdas,
+        ...fetchedLambda,
         type
       }
     }
