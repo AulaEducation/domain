@@ -102,7 +102,10 @@ class Domain extends Component {
       this.context.debug(
         subdomain.triggers ? 'Adding lambda triggers' : 'No lambda triggers to configure'
       )
-      const triggers = subdomain.triggers ? await addLambdaTrigger(lambda, subdomain) : []
+      const triggers =
+        subdomain.triggers || subdomain.customLambdaAssociations
+          ? await addLambdaTrigger(lambda, subdomain)
+          : []
       if (subdomain.type === 'awsS3Website') {
         this.context.debug(`Configuring domain "${subdomain.domain}" for S3 Bucket Website`)
 
